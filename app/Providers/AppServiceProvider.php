@@ -31,6 +31,12 @@ class AppServiceProvider extends ServiceProvider
      */
     private function ensureSqliteDatabase(): void
     {
+        // Skip during console commands (composer scripts, package:discover, artisan)
+        // Only auto-init on HTTP requests to avoid issues during build phase
+        if ($this->app->runningInConsole()) {
+            return;
+        }
+
         if (config('database.default') !== 'sqlite') {
             return;
         }
