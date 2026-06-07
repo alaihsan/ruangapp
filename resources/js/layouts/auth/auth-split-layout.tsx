@@ -83,7 +83,7 @@ export default function AuthSplitLayout({ children, title, description }: AuthLa
 
                 {/* 5. Taglines / Footer Info */}
                 <div className="relative z-20 space-y-2">
-                    <h2 className="text-xl font-bold text-neutral-900 dark:text-white tracking-tight">Portal Distribusi iPadOS Perusahaan</h2>
+                    <h2 className="text-xl font-bold text-neutral-900 dark:text-white tracking-tight">Portal Distribusi iPadOS iPad murid</h2>
                     <p className="text-neutral-500 dark:text-neutral-400 text-xs font-light max-w-sm leading-relaxed">
                         Kelola dan instal aplikasi iPadOS internal secara aman menggunakan integrasi Apple Developer Program dan simulasi MDM.
                     </p>

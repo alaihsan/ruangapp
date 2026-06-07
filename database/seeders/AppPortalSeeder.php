@@ -85,7 +85,7 @@ class AppPortalSeeder extends Seeder
             [
                 'name' => 'Logistics Scanner',
                 'bundle_id' => 'com.ruangapp.scanner',
-                'description' => 'Aplikasi pemindaian barcode dan QR code cepat untuk melacak inventori pergudangan, penerimaan barang, dan pengiriman barang terintegrasi dengan ERP perusahaan.',
+                'description' => 'Aplikasi pemindaian barcode dan QR code cepat untuk melacak inventori pergudangan, penerimaan barang, dan pengiriman barang terintegrasi dengan ERP iPad murid.',
                 'icon' => json_encode(['bg' => 'from-amber-500 to-orange-600', 'symbol' => 'SCAN', 'iconName' => 'QrCode']),
                 'category' => 'Utilities',
                 'latest_version' => '1.0.5',

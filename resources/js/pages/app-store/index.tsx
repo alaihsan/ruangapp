@@ -1286,7 +1286,7 @@ export default function AppStorePortal() {
                                                     type="email" 
                                                     value={newAppleId.email}
                                                     onChange={e => setNewAppleId({...newAppleId, email: e.target.value})}
-                                                    placeholder="Contoh: iosdev@perusahaan.com"
+                                                    placeholder="Contoh: iosdev@ipadmurid.com"
                                                     className="w-full bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500"
                                                     required
                                                 />
