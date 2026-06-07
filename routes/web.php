@@ -5,6 +5,7 @@ use App\Http\Controllers\AppleIdController;
 use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\IpadManagementController;
+use App\Http\Controllers\SimulatorController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
