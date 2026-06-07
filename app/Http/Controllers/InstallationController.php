@@ -22,7 +22,7 @@ class InstallationController extends Controller
             'device_ids' => ['nullable', 'array'],
             'device_ids.*' => ['exists:devices,id'],
             'app_id' => ['required', 'exists:apps,id'],
-            'mode' => ['required', 'in:ad-hoc,mdm'],
+            'mode' => ['required', 'in:mdm'],
         ]);
 
         $app = App::findOrFail($request->app_id);

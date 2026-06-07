@@ -30,7 +30,7 @@ export default function AuthSplitLayout({ children, title, description }: AuthLa
                         <AppLogoIcon className="size-6 text-white dark:text-slate-950 fill-current" />
                     </div>
                     <div>
-                        <span className="text-base font-extrabold tracking-tight bg-gradient-to-r from-neutral-900 to-neutral-600 dark:from-white dark:via-indigo-100 dark:to-slate-400 bg-clip-text text-transparent">{name || 'RuangApp'}</span>
+                        <span className="text-base font-extrabold tracking-tight bg-gradient-to-r from-neutral-900 to-neutral-600 dark:from-white dark:via-indigo-100 dark:to-slate-400 bg-clip-text text-transparent">{name || 'Ruang App iPad'}</span>
                         <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono tracking-widest uppercase block -mt-1 font-bold">DISTRIBUTION PORTAL</span>
                     </div>
                 </div>
