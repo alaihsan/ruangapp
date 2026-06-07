@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\LinkAppleIdRequest;
+use App\Models\AdminActivityLog;
 use App\Models\AppleId;
 use Illuminate\Http\RedirectResponse;
 
@@ -13,7 +14,15 @@ class AppleIdController extends Controller
      */
     public function store(LinkAppleIdRequest $request): RedirectResponse
     {
-        $request->user()->appleIds()->create($request->validated());
+        $appleId = $request->user()->appleIds()->create($request->validated());
+
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'LINK_APPLE_ID',
+            'target_name' => $appleId->email,
+            'details' => "Admin menautkan Apple Developer Account baru: {$appleId->email} ({$appleId->account_type}).",
+            'ip_address' => $request->ip(),
+        ]);
 
         return back()->with('status', 'Apple ID berhasil ditautkan.');
     }
@@ -27,9 +36,17 @@ class AppleIdController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
+        $email = $appleId->email;
         $appleId->delete();
+
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'UNLINK_APPLE_ID',
+            'target_name' => $email,
+            'details' => "Admin melepas tautan Apple Developer Account: {$email}.",
+            'ip_address' => request()->ip(),
+        ]);
 
         return back()->with('status', 'Apple ID berhasil dilepas.');
     }
 }
-

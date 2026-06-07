@@ -4,7 +4,7 @@ import { NavUser } from '@/components/nav-user';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/react';
-import { BookOpen, Folder, LayoutGrid, Smartphone, User, Terminal, Sliders, TrendingUp } from 'lucide-react';
+import { BookOpen, Folder, LayoutGrid, Smartphone, User, Terminal, Sliders, TrendingUp, History } from 'lucide-react';
 import AppLogo from './app-logo';
 
 const mainNavItems: NavItem[] = [
@@ -22,6 +22,11 @@ const mainNavItems: NavItem[] = [
         title: 'My iPads',
         url: '/dashboard?tab=devices',
         icon: Smartphone,
+    },
+    {
+        title: 'Log Aktivitas',
+        url: '/dashboard?tab=activity-logs',
+        icon: History,
     },
     {
         title: 'Dev Logs',

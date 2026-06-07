@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminActivityLog;
 use App\Models\App;
 use App\Models\InstalledApp;
 use App\Models\SimulationLog;
-use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 
 class SimulatorController extends Controller
 {
@@ -29,14 +30,22 @@ class SimulatorController extends Controller
             // Auto-increment the last digit of the version (e.g. 1.0.5 -> 1.0.6)
             $parts = explode('.', $oldVersion);
             if (count($parts) === 3 && is_numeric($parts[2])) {
-                $parts[2] = ((int)$parts[2]) + 1;
+                $parts[2] = ((int) $parts[2]) + 1;
                 $newVersion = implode('.', $parts);
             } else {
-                $newVersion = $oldVersion . '.1';
+                $newVersion = $oldVersion.'.1';
             }
         }
 
         $app->update(['latest_version' => $newVersion]);
+
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'RELEASE_UPDATE',
+            'target_name' => $app->name,
+            'details' => "Admin merilis versi baru aplikasi {$app->name}: v{$oldVersion} -> v{$newVersion}.",
+            'ip_address' => $request->ip(),
+        ]);
 
         return back()->with('status', "Versi baru v{$newVersion} untuk {$app->name} berhasil dirilis!");
     }
@@ -51,6 +60,14 @@ class SimulatorController extends Controller
 
         InstalledApp::whereIn('device_id', $deviceIds)->delete();
         SimulationLog::whereIn('device_id', $deviceIds)->delete();
+
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'RESET_SIMULATOR',
+            'target_name' => 'Simulator',
+            'details' => 'Admin melakukan reset data simulasi instalasi dan log perangkat.',
+            'ip_address' => $request->ip(),
+        ]);
 
         return back()->with('status', 'Semua simulasi instalasi dan log perangkat Anda telah di-reset.');
     }

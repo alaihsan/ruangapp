@@ -3,13 +3,15 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
+    /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
     /**
@@ -54,9 +56,9 @@ class User extends Authenticatable
     /**
      * Get the Apple IDs linked to this user.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\AppleId, $this>
+     * @return HasMany<AppleId, $this>
      */
-    public function appleIds(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function appleIds(): HasMany
     {
         return $this->hasMany(AppleId::class);
     }
@@ -64,11 +66,20 @@ class User extends Authenticatable
     /**
      * Get the devices registered under this user.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Device, $this>
+     * @return HasMany<Device, $this>
      */
-    public function devices(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function devices(): HasMany
     {
         return $this->hasMany(Device::class);
     }
-}
 
+    /**
+     * Get the admin activity logs for this user.
+     *
+     * @return HasMany<AdminActivityLog, $this>
+     */
+    public function adminActivityLogs(): HasMany
+    {
+        return $this->hasMany(AdminActivityLog::class);
+    }
+}

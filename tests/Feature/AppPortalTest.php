@@ -8,7 +8,7 @@ use App\Models\User;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
-    
+
     // Seed an app (renamed to avoid overwriting the Laravel container at $this->app)
     $this->portalApp = App::create([
         'name' => 'Test POS',
@@ -34,7 +34,6 @@ test('authenticated user can view portal dashboard', function () {
         ->get('/dashboard?tab=today')
         ->assertOk();
 });
-
 
 test('user can link Apple ID', function () {
     $this->actingAs($this->user)
@@ -259,4 +258,58 @@ test('user can reset all simulations', function () {
     ]);
 });
 
+test('admin activity is logged when device is registered', function () {
+    $this->actingAs($this->user)
+        ->post('/devices', [
+            'name' => 'Log iPad',
+            'model' => 'iPad Air',
+            'udid' => '1111111111222222222233333333334444444444',
+        ])
+        ->assertRedirect();
 
+    $this->assertDatabaseHas('admin_activity_logs', [
+        'user_id' => $this->user->id,
+        'action' => 'REGISTER_DEVICE',
+        'target_name' => 'Log iPad',
+    ]);
+});
+
+test('admin activity is logged on bulk app installation', function () {
+    $device1 = Device::create([
+        'user_id' => $this->user->id,
+        'name' => 'iPad Alpha',
+        'model' => 'iPad Pro',
+        'udid' => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    ]);
+
+    $device2 = Device::create([
+        'user_id' => $this->user->id,
+        'name' => 'iPad Beta',
+        'model' => 'iPad Pro',
+        'udid' => 'cccccccccccccccccccccccccccccccccccccccc',
+    ]);
+
+    $this->actingAs($this->user)
+        ->postJson('/portal/install', [
+            'device_ids' => [$device1->id, $device2->id],
+            'app_id' => $this->portalApp->id,
+            'mode' => 'mdm',
+        ])
+        ->assertOk();
+
+    $this->assertDatabaseHas('admin_activity_logs', [
+        'user_id' => $this->user->id,
+        'action' => 'INSTALL_APP',
+        'target_name' => $this->portalApp->name,
+    ]);
+
+    $this->assertDatabaseHas('installed_apps', [
+        'device_id' => $device1->id,
+        'app_id' => $this->portalApp->id,
+    ]);
+
+    $this->assertDatabaseHas('installed_apps', [
+        'device_id' => $device2->id,
+        'app_id' => $this->portalApp->id,
+    ]);
+});

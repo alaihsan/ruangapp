@@ -27,7 +27,8 @@ import {
     ChevronRight,
     Star,
     Share2,
-    Clock
+    Clock,
+    Users
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -92,12 +93,24 @@ interface LogItem {
     device?: DeviceItem;
 }
 
+interface AdminLogItem {
+    id: number;
+    user_id: number;
+    action: string;
+    target_name: string;
+    details: string;
+    ip_address: string;
+    created_at: string;
+    updated_at: string;
+}
+
 interface PageProps {
     apps: AppItem[];
     devices: DeviceItem[];
     appleIds: AppleIdItem[];
     installedApps: InstalledAppItem[];
     logs: LogItem[];
+    adminLogs: AdminLogItem[];
     auth: {
         user: {
             id: number;
@@ -318,11 +331,11 @@ const MockScreenshots = ({ bundleId }: { bundleId: string }) => {
 };
 
 export default function AppStorePortal() {
-    const { apps, devices, appleIds, installedApps, logs } = usePage<any>().props as unknown as PageProps;
+    const { apps, devices, appleIds, installedApps, logs, adminLogs } = usePage<any>().props as unknown as PageProps;
     
     // Resolve activeTab directly from URL query parameters (controlled by left sidebar)
     const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-    const activeTab = (urlParams?.get('tab') || 'today') as 'today' | 'apps' | 'devices' | 'apple-id' | 'logs' | 'simulator';
+    const activeTab = (urlParams?.get('tab') || 'today') as 'today' | 'apps' | 'devices' | 'activity-logs' | 'apple-id' | 'logs' | 'simulator';
 
     // UI state management
     const [selectedApp, setSelectedApp] = useState<AppItem | null>(null);
@@ -331,6 +344,13 @@ export default function AppStorePortal() {
     const [installingAppId, setInstallingAppId] = useState<number | null>(null);
     const [localLogs, setLocalLogs] = useState<LogItem[]>(logs);
     const [iosAlert, setIosAlert] = useState<{title: string, message: string} | null>(null);
+    
+    // Target Selection Modal states
+    const [installTargetModalOpen, setInstallTargetModalOpen] = useState(false);
+    const [appToInstall, setAppToInstall] = useState<AppItem | null>(null);
+    const [selectedTargetIds, setSelectedTargetIds] = useState<number[]>([]);
+    const [targetSearchText, setTargetSearchText] = useState('');
+    const [installOption, setInstallOption] = useState<'active' | 'all' | 'custom'>('active');
     
     // Sliders & Filters states
     const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -422,6 +442,15 @@ export default function AppStorePortal() {
             return;
         }
 
+        // Intercept MDM installations to prompt for targets
+        if (mode === 'mdm') {
+            setAppToInstall(app);
+            setSelectedTargetIds([selectedDevice.id]);
+            setInstallOption('active');
+            setInstallTargetModalOpen(true);
+            return;
+        }
+
         // Validate Ad-Hoc Prerequisites
         if (mode === 'ad-hoc') {
             const hasAppleId = appleIds.some(id => id.account_type.includes('Developer') || id.account_type.includes('Company'));
@@ -464,11 +493,58 @@ export default function AppStorePortal() {
         });
     };
 
+    // Execute MDM App Installation for chosen targets (single/bulk)
+    const handleExecuteMdmInstall = () => {
+        if (!appToInstall || selectedTargetIds.length === 0) return;
+
+        setInstallTargetModalOpen(false);
+        setInstallingAppId(appToInstall.id);
+        setSelectedApp(null);
+
+        fetch(route('portal.install'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || ''
+            },
+            body: JSON.stringify({
+                device_ids: selectedTargetIds,
+                app_id: appToInstall.id,
+                mode: 'mdm'
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                if (data.is_bulk) {
+                    setInstallingAppId(null);
+                    setIosAlert({
+                        title: 'Push MDM Massal Berhasil',
+                        message: `Perintah push 'InstallApplication' untuk ${appToInstall.name} berhasil disinkronkan ke server Mosyle MDM untuk ${selectedTargetIds.length} perangkat murid.\n\nInstalasi massal ini akan diproses di latar belakang secara otomatis.`
+                    });
+                    router.reload({ only: ['installedApps', 'logs', 'adminLogs'] });
+                } else {
+                    // Small number of targets, simulate progress for each
+                    data.installed_apps.forEach((ia: any) => {
+                        simulateProgress(ia.id, 20);
+                    });
+                }
+            } else {
+                setIosAlert({ title: 'Error', message: data.error || 'Gagal memulai simulasi.' });
+                setInstallingAppId(null);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            setInstallingAppId(null);
+        });
+    };
+
     // Recursive progressive ticks to simulate OTA installation steps
     const simulateProgress = (installedAppId: number, nextProgress: number) => {
         if (nextProgress > 100) {
             setInstallingAppId(null);
-            router.reload({ only: ['installedApps', 'logs'] });
+            router.reload({ only: ['installedApps', 'logs', 'adminLogs'] });
             return;
         }
 
@@ -488,7 +564,7 @@ export default function AppStorePortal() {
             .then(data => {
                 if (data.status === 'success') {
                     router.reload({ 
-                        only: ['installedApps', 'logs'],
+                        only: ['installedApps', 'logs', 'adminLogs'],
                         onSuccess: () => {
                             simulateProgress(installedAppId, nextProgress + 20);
                         }
@@ -1284,6 +1360,93 @@ export default function AppStorePortal() {
                             </div>
                         )}
 
+                        {/* LOG AKTIVITAS (ADMIN AUDIT LOGS) TAB */}
+                        {activeTab === 'activity-logs' && (
+                            <div className="space-y-6 max-w-5xl mx-auto w-full animate-in fade-in duration-200">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-2xl font-bold tracking-tight">Log Aktivitas Administrator</h2>
+                                        <p className="text-xs text-neutral-500 dark:text-neutral-450 font-light mt-0.5">
+                                            Catatan audit resmi dari semua tindakan administratif yang dilakukan oleh admin di dalam portal Ruang App iPad.
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => router.reload({ only: ['adminLogs'] })}
+                                        className="bg-white dark:bg-neutral-850 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs border border-neutral-300 dark:border-neutral-750 px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
+                                    >
+                                        <RefreshCw className="w-3.5 h-3.5" /> Refresh Log
+                                    </button>
+                                </div>
+
+                                <div className="bg-white dark:bg-neutral-900 border border-neutral-250 dark:border-neutral-850 rounded-2xl overflow-hidden shadow-sm">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse text-xs">
+                                            <thead>
+                                                <tr className="bg-neutral-50 dark:bg-neutral-950/40 border-b border-neutral-250 dark:border-neutral-800/60 text-neutral-500 font-semibold">
+                                                    <th className="p-4 w-[180px]">Waktu</th>
+                                                    <th className="p-4 w-[140px]">Aksi</th>
+                                                    <th className="p-4 w-[180px]">Target</th>
+                                                    <th className="p-4">Detail Aktivitas</th>
+                                                    <th className="p-4 w-[120px] text-right">IP Address</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-850">
+                                                {adminLogs.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={5} className="text-center py-16 text-neutral-400 font-light">
+                                                            Belum ada riwayat aktivitas admin.
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    adminLogs.map((log) => {
+                                                        const date = new Date(log.created_at);
+                                                        const formattedDate = date.toLocaleDateString('id-ID', {
+                                                            day: 'numeric',
+                                                            month: 'short',
+                                                            year: 'numeric'
+                                                        }) + ' ' + date.toLocaleTimeString('id-ID', {
+                                                            hour: '2-digit',
+                                                            minute: '2-digit',
+                                                            second: '2-digit'
+                                                        });
+
+                                                        let badgeBg = 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300';
+                                                        if (log.action === 'INSTALL_APP') badgeBg = 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400';
+                                                        if (log.action === 'DELETE_APP') badgeBg = 'bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400';
+                                                        if (log.action === 'RELEASE_UPDATE') badgeBg = 'bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400';
+                                                        if (log.action === 'SYNC_DEVICES' || log.action === 'REGISTER_DEVICE') badgeBg = 'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400';
+                                                        if (log.action === 'RESET_SIMULATOR') badgeBg = 'bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400';
+
+                                                        return (
+                                                            <tr key={log.id} className="hover:bg-neutral-50/40 dark:hover:bg-neutral-900/40 transition-colors">
+                                                                <td className="p-4 font-mono text-neutral-400 dark:text-neutral-500 whitespace-nowrap">
+                                                                    {formattedDate}
+                                                                </td>
+                                                                <td className="p-4 whitespace-nowrap">
+                                                                    <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase ${badgeBg}`}>
+                                                                        {log.action.replace('_', ' ')}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-4 font-semibold text-neutral-800 dark:text-neutral-200">
+                                                                    {log.target_name || '-'}
+                                                                </td>
+                                                                <td className="p-4 text-neutral-500 dark:text-neutral-400 leading-normal font-light">
+                                                                    {log.details}
+                                                                </td>
+                                                                <td className="p-4 text-right font-mono text-neutral-400 dark:text-neutral-500">
+                                                                    {log.ip_address || '127.0.0.1'}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* F. ADMIN CONTROLS TAB */}
                         {activeTab === 'simulator' && (
                             <div className="space-y-6 max-w-5xl mx-auto w-full">
@@ -1366,6 +1529,198 @@ export default function AppStorePortal() {
                                 className="w-full text-center py-3 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-neutral-50 dark:hover:bg-neutral-850 active:bg-neutral-100 dark:active:bg-neutral-800 transition-all outline-none"
                             >
                                 Tutup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Target Selection Modal (MDM App Distribution) */}
+            {installTargetModalOpen && appToInstall && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-250 dark:border-neutral-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+                        
+                        {/* Header */}
+                        <div className="p-5 border-b border-neutral-100 dark:border-neutral-850 flex justify-between items-center bg-neutral-50 dark:bg-neutral-950/20">
+                            <div>
+                                <h4 className="font-extrabold text-sm text-neutral-900 dark:text-white flex items-center gap-1.5">
+                                    <Download className="w-4 h-4 text-emerald-500" /> Distribusi Aplikasi (MDM)
+                                </h4>
+                                <span className="text-[10px] text-neutral-400 block mt-0.5">Pilih target penerima untuk <strong>{appToInstall.name}</strong></span>
+                            </div>
+                            <button 
+                                onClick={() => setInstallTargetModalOpen(false)}
+                                className="text-neutral-400 hover:text-neutral-600 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 p-1.5 rounded-full transition-all"
+                            >
+                                <X className="w-4.5 h-4.5" />
+                            </button>
+                        </div>
+
+                        {/* Options */}
+                        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+                            <div className="space-y-2.5">
+                                <label className="text-xs font-bold text-neutral-500 dark:text-neutral-450 block uppercase tracking-wider">Opsi Sasaran Distribusi</label>
+                                
+                                <div className="grid gap-2">
+                                    {/* Option 1: Selected Device */}
+                                    {selectedDevice && (
+                                        <div 
+                                            onClick={() => {
+                                                setInstallOption('active');
+                                                setSelectedTargetIds([selectedDevice.id]);
+                                            }}
+                                            className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${installOption === 'active' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500' : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-850 hover:bg-neutral-100/30'}`}
+                                        >
+                                            <div className="flex gap-3 items-center">
+                                                <div className={`p-2 rounded-lg ${installOption === 'active' ? 'bg-indigo-500 text-white' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'}`}>
+                                                    <Smartphone className="w-4 h-4" />
+                                                </div>
+                                                <div className="text-left">
+                                                    <strong className="text-xs block text-neutral-900 dark:text-white">iPad Murid Aktif Saat Ini</strong>
+                                                    <span className="text-[10px] text-neutral-400 block">{selectedDevice.name} • {selectedDevice.model}</span>
+                                                </div>
+                                            </div>
+                                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${installOption === 'active' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-neutral-300'}`}>
+                                                {installOption === 'active' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Option 2: All Devices */}
+                                    <div 
+                                        onClick={() => {
+                                            setInstallOption('all');
+                                            setSelectedTargetIds(devices.map(d => d.id));
+                                        }}
+                                        className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${installOption === 'all' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500' : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-850 hover:bg-neutral-100/30'}`}
+                                    >
+                                        <div className="flex gap-3 items-center">
+                                            <div className={`p-2 rounded-lg ${installOption === 'all' ? 'bg-indigo-500 text-white' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'}`}>
+                                                <Users className="w-4 h-4" />
+                                            </div>
+                                            <div className="text-left">
+                                                <strong className="text-xs block text-neutral-900 dark:text-white">Semua iPad Murid Terkelola</strong>
+                                                <span className="text-[10px] text-neutral-400 block">Kirim perintah push massal ke seluruh {devices.length} perangkat</span>
+                                            </div>
+                                        </div>
+                                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${installOption === 'all' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-neutral-300'}`}>
+                                            {installOption === 'all' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                        </div>
+                                    </div>
+
+                                    {/* Option 3: Custom Devices Selection */}
+                                    <div 
+                                        onClick={() => {
+                                            setInstallOption('custom');
+                                            setSelectedTargetIds([]); // clear to let them pick
+                                        }}
+                                        className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${installOption === 'custom' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500' : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-850 hover:bg-neutral-100/30'}`}
+                                    >
+                                        <div className="flex gap-3 items-center">
+                                            <div className={`p-2 rounded-lg ${installOption === 'custom' ? 'bg-indigo-500 text-white' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'}`}>
+                                                <Search className="w-4 h-4" />
+                                            </div>
+                                            <div className="text-left">
+                                                <strong className="text-xs block text-neutral-900 dark:text-white">Pilih iPad Tertentu (Multi-Select)</strong>
+                                                <span className="text-[10px] text-neutral-400 block">Pilih satu per satu dengan pencarian dan filter</span>
+                                            </div>
+                                        </div>
+                                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${installOption === 'custom' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-neutral-300'}`}>
+                                            {installOption === 'custom' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Custom Selection Area */}
+                            {installOption === 'custom' && (
+                                <div className="space-y-3 border-t border-neutral-100 dark:border-neutral-800/80 pt-4 animate-in fade-in duration-200">
+                                    <div className="flex items-center gap-1.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-250 dark:border-neutral-850 px-2.5 py-2 rounded-xl text-xs shadow-xs">
+                                        <Search className="w-4 h-4 text-neutral-400" />
+                                        <input 
+                                            type="text" 
+                                            value={targetSearchText}
+                                            onChange={(e) => setTargetSearchText(e.target.value)}
+                                            placeholder="Cari nama, model, atau UDID murid..." 
+                                            className="bg-transparent border-none outline-none text-neutral-800 dark:text-neutral-200 placeholder-neutral-450 w-full"
+                                        />
+                                        {targetSearchText && <X className="w-3.5 h-3.5 text-neutral-400 cursor-pointer" onClick={() => setTargetSearchText('')} />}
+                                    </div>
+
+                                    <div className="max-h-[160px] overflow-y-auto border border-neutral-200 dark:border-neutral-800/60 rounded-xl divide-y divide-neutral-100 dark:divide-neutral-850 bg-white dark:bg-neutral-900 shadow-sm p-1.5">
+                                        {(() => {
+                                            const targets = devices.filter(d => {
+                                                const term = targetSearchText.toLowerCase();
+                                                return d.name.toLowerCase().includes(term) ||
+                                                       d.model.toLowerCase().includes(term) ||
+                                                       d.udid.toLowerCase().includes(term);
+                                            });
+
+                                            if (targets.length === 0) {
+                                                return <div className="text-center py-6 text-xs text-neutral-400 font-light">Tidak ada iPad yang cocok.</div>;
+                                            }
+
+                                            return targets.map(d => {
+                                                const isChecked = selectedTargetIds.includes(d.id);
+                                                return (
+                                                    <label 
+                                                        key={d.id}
+                                                        className="flex items-center justify-between p-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-950 rounded-lg cursor-pointer transition-colors"
+                                                    >
+                                                        <div className="flex gap-2 items-center">
+                                                            <Smartphone className="w-4 h-4 text-neutral-400" />
+                                                            <div className="text-left">
+                                                                <span className="text-xs font-semibold block text-neutral-800 dark:text-neutral-200">{d.name}</span>
+                                                                <span className="text-[9px] text-neutral-400 block">{d.model} • {d.os_version}</span>
+                                                            </div>
+                                                        </div>
+                                                        <input 
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={() => {
+                                                                if (isChecked) {
+                                                                    setSelectedTargetIds(prev => prev.filter(id => id !== d.id));
+                                                                } else {
+                                                                    setSelectedTargetIds(prev => [...prev, d.id]);
+                                                                }
+                                                            }}
+                                                            className="w-3.5 h-3.5 accent-indigo-600 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+                                                    </label>
+                                                );
+                                            });
+                                        })()}
+                                    </div>
+                                    <div className="flex justify-between items-center text-[10px] text-neutral-450">
+                                        <span>Terpilih: <strong>{selectedTargetIds.length}</strong> perangkat</span>
+                                        <button 
+                                            type="button"
+                                            onClick={() => setSelectedTargetIds(selectedTargetIds.length === devices.length ? [] : devices.map(d => d.id))}
+                                            className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                                        >
+                                            {selectedTargetIds.length === devices.length ? 'Bersihkan Semua' : 'Pilih Semua'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-4 bg-neutral-50 dark:bg-neutral-950/40 border-t border-neutral-100 dark:border-neutral-850 flex gap-3 justify-end">
+                            <button 
+                                type="button"
+                                onClick={() => setInstallTargetModalOpen(false)}
+                                className="px-4 py-2 border border-neutral-250 dark:border-neutral-850 text-neutral-600 dark:text-neutral-400 font-medium rounded-lg text-xs hover:bg-neutral-100 dark:hover:bg-neutral-850 transition-colors"
+                            >
+                                Batal
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={handleExecuteMdmInstall}
+                                disabled={selectedTargetIds.length === 0}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold rounded-lg text-xs transition-all active:scale-98 shadow-sm"
+                            >
+                                Mulai Pemasangan ({selectedTargetIds.length})
                             </button>
                         </div>
                     </div>

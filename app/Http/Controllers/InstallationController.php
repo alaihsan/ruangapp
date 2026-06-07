@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminActivityLog;
 use App\Models\App;
 use App\Models\Device;
 use App\Models\InstalledApp;
 use App\Models\SimulationLog;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 
 class InstallationController extends Controller
 {
@@ -18,60 +18,112 @@ class InstallationController extends Controller
     public function install(Request $request): JsonResponse
     {
         $request->validate([
-            'device_id' => ['required', 'exists:devices,id'],
+            'device_id' => ['nullable', 'exists:devices,id'],
+            'device_ids' => ['nullable', 'array'],
+            'device_ids.*' => ['exists:devices,id'],
             'app_id' => ['required', 'exists:apps,id'],
             'mode' => ['required', 'in:ad-hoc,mdm'],
         ]);
 
-        $device = Device::findOrFail($request->device_id);
         $app = App::findOrFail($request->app_id);
         $mode = $request->mode;
 
-        // Ensure device belongs to user
-        if ($device->user_id !== auth()->id()) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+        // Resolve device IDs
+        $deviceIds = [];
+        if ($request->filled('device_ids')) {
+            $deviceIds = $request->device_ids;
+        } elseif ($request->filled('device_id')) {
+            $deviceIds = [$request->device_id];
         }
 
-        // Delete any existing failed/deleted record
-        InstalledApp::where('device_id', $device->id)
-            ->where('app_id', $app->id)
-            ->delete();
+        if (empty($deviceIds)) {
+            return response()->json(['error' => 'Device ID or Device IDs are required'], 422);
+        }
 
-        // Create new installation record
-        $installedApp = InstalledApp::create([
-            'device_id' => $device->id,
-            'app_id' => $app->id,
-            'installed_version' => '0.0.0', // Not fully active yet
-            'status' => 'installing',
-            'progress' => 0,
-            'distribution_mode' => $mode,
-        ]);
+        $devices = Device::whereIn('id', $deviceIds)->get();
 
-        // Wipe old logs for this device/app to keep it clean
-        SimulationLog::where('device_id', $device->id)
-            ->where('app_id', $app->id)
-            ->delete();
+        // Ensure all devices belong to the user
+        foreach ($devices as $device) {
+            if ($device->user_id !== auth()->id()) {
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+        }
 
-        // Generate the first log based on mode
-        $message = '';
-        if ($mode === 'ad-hoc') {
-            $message = "Ad-Hoc: Memeriksa registrasi UDID device ({$device->udid}) di Apple Developer Member Center... Terdaftar (slot 14/100 digunakan).";
+        $installedApps = [];
+        $isBulk = count($deviceIds) > 5;
+
+        foreach ($devices as $device) {
+            // Delete any existing failed/deleted record
+            InstalledApp::where('device_id', $device->id)
+                ->where('app_id', $app->id)
+                ->delete();
+
+            // Create new installation record
+            $installedApp = InstalledApp::create([
+                'device_id' => $device->id,
+                'app_id' => $app->id,
+                'installed_version' => $isBulk ? $app->latest_version : '0.0.0', // Active immediately if bulk
+                'status' => $isBulk ? 'active' : 'installing',
+                'progress' => $isBulk ? 100 : 0,
+                'distribution_mode' => $mode,
+            ]);
+
+            // Wipe old logs for this device/app to keep it clean
+            SimulationLog::where('device_id', $device->id)
+                ->where('app_id', $app->id)
+                ->delete();
+
+            // Generate initial log
+            $message = $mode === 'ad-hoc'
+                ? "Ad-Hoc: Memeriksa registrasi UDID device ({$device->udid}) di Apple Developer Member Center... Terdaftar."
+                : "MDM: Server MDM memeriksa pendaftaran perangkat {$device->name} ({$device->udid})... Perangkat online.";
+
+            SimulationLog::create([
+                'device_id' => $device->id,
+                'app_id' => $app->id,
+                'installed_app_id' => $installedApp->id,
+                'step_name' => 'init_check',
+                'message' => $message,
+                'type' => 'info',
+            ]);
+
+            if ($isBulk) {
+                SimulationLog::create([
+                    'device_id' => $device->id,
+                    'app_id' => $app->id,
+                    'installed_app_id' => $installedApp->id,
+                    'step_name' => 'tick_100',
+                    'message' => "iOS System: Instalasi selesai! Aplikasi {$app->name} (v{$app->latest_version}) berhasil dipasang pada {$device->name} via server MDM (Bulk Push).",
+                    'type' => 'success',
+                ]);
+            }
+
+            $installedApps[] = $installedApp;
+        }
+
+        // Record Admin Activity Log
+        $ipAddress = $request->ip();
+        $targetName = $app->name;
+        if (count($devices) === 1) {
+            $device = $devices->first();
+            $details = "Admin menginisiasi pemasangan aplikasi {$app->name} pada perangkat {$device->name} via server MDM.";
         } else {
-            $message = "MDM: Server MDM memeriksa pendaftaran perangkat {$device->name} ({$device->udid})... Perangkat online.";
+            $details = "Admin menginisiasi pemasangan aplikasi {$app->name} secara massal pada ".count($devices).' perangkat iPad Murid via server MDM.';
         }
 
-        SimulationLog::create([
-            'device_id' => $device->id,
-            'app_id' => $app->id,
-            'installed_app_id' => $installedApp->id,
-            'step_name' => 'init_check',
-            'message' => $message,
-            'type' => 'info',
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'INSTALL_APP',
+            'target_name' => $targetName,
+            'details' => $details,
+            'ip_address' => $ipAddress,
         ]);
 
         return response()->json([
-            'installed_app' => $installedApp,
+            'installed_apps' => $installedApps,
+            'installed_app' => $installedApps[0] ?? null,
             'status' => 'success',
+            'is_bulk' => $isBulk,
         ]);
     }
 
@@ -100,12 +152,12 @@ class InstallationController extends Controller
 
         // Generate logs based on progress and mode
         $logMessage = null;
-        $stepName = "tick_" . $progress;
+        $stepName = 'tick_'.$progress;
         $logType = 'info';
 
         if ($progress == 20) {
             if ($mode === 'ad-hoc') {
-                $logMessage = "Ad-Hoc: Mengunduh Provisioning Profile (.mobileprovision) terbaru dari portal developer yang menyertakan UDID perangkat ini...";
+                $logMessage = 'Ad-Hoc: Mengunduh Provisioning Profile (.mobileprovision) terbaru dari portal developer yang menyertakan UDID perangkat ini...';
             } else {
                 $logMessage = "MDM: Mengirim perintah APNs (Apple Push Notification service) 'InstallApplication' ke perangkat via server APNs Apple...";
             }
@@ -117,27 +169,26 @@ class InstallationController extends Controller
             }
         } elseif ($progress == 60) {
             if ($mode === 'ad-hoc') {
-                $logMessage = "OTA Portal: Membuat manifes instalasi XML (manifest.plist) yang berisi tautan aman (HTTPS) file IPA dan ikon aplikasi...";
+                $logMessage = 'OTA Portal: Membuat manifes instalasi XML (manifest.plist) yang berisi tautan aman (HTTPS) file IPA dan ikon aplikasi...';
             } else {
-                $logMessage = "MDM VPP: Server memvalidasi lisensi aplikasi melalui Apple Business Manager (Volume Purchase Program)... Lisensi aman.";
+                $logMessage = 'MDM VPP: Server memvalidasi lisensi aplikasi melalui Apple Business Manager (Volume Purchase Program)... Lisensi aman.';
             }
         } elseif ($progress == 80) {
             if ($mode === 'ad-hoc') {
                 $logMessage = "OTA Portal: Memicu protokol instalasi bawaan iOS melalui URL scheme 'itms-services://?action=download-manifest&url=https://ruangapp.com/manifests/{$app->bundle_id}.plist'...";
             } else {
-                $logMessage = "MDM: Perangkat mulai mengunduh file IPA sebesar 48.2 MB secara aman menggunakan token enkripsi khusus...";
+                $logMessage = 'MDM: Perangkat mulai mengunduh file IPA sebesar 48.2 MB secara aman menggunakan token enkripsi khusus...';
             }
         } elseif ($progress == 100) {
             $logMessage = "iOS System: Instalasi selesai! Aplikasi {$app->name} (v{$app->latest_version}) berhasil dipasang pada {$device->name} dan siap digunakan.";
             $logType = 'success';
-            
+
             // Set installed app active
             $installedApp->update([
                 'status' => 'active',
                 'installed_version' => $app->latest_version,
             ]);
         }
-
 
         if ($logMessage) {
             SimulationLog::create([
@@ -239,12 +290,20 @@ class InstallationController extends Controller
             'app_id' => $app->id,
             'installed_app_id' => $installedApp->id,
             'step_name' => 'delete_cleanup',
-            'message' => "iOS System: Menghapus file binary .app, data lokal dalam sandbox, dan membersihkan preferensi pengguna... Selesai.",
+            'message' => 'iOS System: Menghapus file binary .app, data lokal dalam sandbox, dan membersihkan preferensi pengguna... Selesai.',
             'type' => 'warning',
         ]);
 
         // Delete the installation record
         $installedApp->delete();
+
+        AdminActivityLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'DELETE_APP',
+            'target_name' => $app->name,
+            'details' => "Admin menghapus aplikasi {$app->name} dari perangkat {$device->name} via server MDM.",
+            'ip_address' => $request->ip(),
+        ]);
 
         return response()->json([
             'status' => 'success',
