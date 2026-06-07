@@ -10,6 +10,7 @@ use App\Models\InstalledApp;
 use App\Models\SimulationLog;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 
 class AppPortalSeeder extends Seeder
@@ -19,10 +20,11 @@ class AppPortalSeeder extends Seeder
      */
     public function run(): void
     {
-        // 1. Get or create primary user
-        $user = User::first() ?? User::factory()->create([
+        // 1. Get or create primary user (avoid factory — faker is dev-only)
+        $user = User::first() ?? User::create([
             'name' => 'Test User',
             'email' => 'test@example.com',
+            'password' => Hash::make('password'),
         ]);
 
         // 2. Link a simulated Apple ID
